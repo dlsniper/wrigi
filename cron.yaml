@@ -1,0 +1,4 @@
+cron:
+- description: update releases from repositories
+  url: /update
+  schedule: every 5 minutes

@@ -1,0 +1,6 @@
+Web Repository Interface for Github hosted IntelliJ plugins
+=====
+
+This project is meant for IntelliJ IDEA plugin authors that use Github and want
+to distribute their plugins with alpha / beta releases using Github releases
+facility and custom plugin configurations.
