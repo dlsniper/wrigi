@@ -1,11 +1,12 @@
 application: github-intellij-plugin
-version: 1
+version: 2
 runtime: go
 api_version: go1
 
 skip_files:
   - wrigi.iml
-  - idea/
+  - .idea/
+  - .git/
   - .gitignore
 
 handlers:

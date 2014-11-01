@@ -3,12 +3,14 @@ package wrigi
 import (
 	"appengine"
 	"appengine/urlfetch"
+	"bytes"
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"github.com/gorilla/mux"
 	"io/ioutil"
 	"net/http"
+	"os"
 	"regexp"
 	"sync"
 	"time"
@@ -94,8 +96,26 @@ var (
 	repositories   []Organization
 	lastUpdate     time.Time
 	lastUpdateLock sync.Mutex
+	OAuthToken     string
 )
 
+func initConfig() {
+	file, err := ioutil.ReadFile("./config.json")
+	if err != nil {
+		fmt.Printf("File error: %v\n", err)
+		os.Exit(1)
+	}
+
+	type CFG struct {
+		Oauth string
+	}
+
+	var cfg CFG
+	json.Unmarshal(file, &cfg)
+	OAuthToken = cfg.Oauth
+
+	initSupportedRepositories()
+}
 func initSupportedRepositories() {
 	organization := Organization{
 		Name: "go-lang-plugin-org",
@@ -227,6 +247,38 @@ func updateHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("Remote repositories updated"))
 }
 
+func tokenHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain")
+	w.Write([]byte(OAuthToken))
+}
+func submitErrorHandler(w http.ResponseWriter, r *http.Request) {
+	var (
+		client *http.Client
+	)
+	vars := mux.Vars(r)
+
+	body, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		return
+	}
+
+	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/issues", vars["owner"], vars["repository"])
+
+	r.Header.Set("User-Agent", userAgent)
+	r.Header.Set("Authorization", "token "+OAuthToken)
+	c := appengine.NewContext(r)
+	client = urlfetch.Client(c)
+
+	response, err := client.Post(url, "application/json", bytes.NewBuffer(body))
+	if err != nil {
+		if appengine.IsDevAppServer() {
+			panic(err)
+		}
+	}
+
+	_ = response
+}
+
 func ideaPluginHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 
@@ -278,12 +330,12 @@ func ideaPluginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	pluginCategory := PluginCategory{
-		Name:       "\"Custom Languages\"",
+		Name:       "Custom Languages",
 		IdeaPlugin: ideaPlugin,
 	}
 
 	plugin := PluginRepository{
-		Ff:       "\"Custom Languages\"",
+		Ff:       "Custom Languages",
 		Category: pluginCategory,
 	}
 
@@ -308,15 +360,19 @@ func ideaPluginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Write(response)
-	w.WriteHeader(200)
 }
 
 func init() {
-	initSupportedRepositories()
+	initConfig()
 
 	r := mux.NewRouter()
-	r.HandleFunc("/", rootHandler)
+	r.HandleFunc("/", rootHandler).Methods("GET")
 	r.HandleFunc("/update", updateHandler)
-	r.HandleFunc("/{owner}/{repository}/{channel}.{format}", ideaPluginHandler)
+	r.HandleFunc("/{owner}/{repository}/submitError", submitErrorHandler).Methods("POST")
+	r.HandleFunc("/{owner}/{repository}/{channel}.{format}", ideaPluginHandler).Methods("GET")
+	r.HandleFunc("/{owner}/{repository}/{channel}/idea.{format}", ideaPluginHandler).Methods("GET")
+
+	//r.HandleFunc("/{owner}/{repository}/token", tokenHandler).Methods("GET")
+
 	http.Handle("/", r)
 }
