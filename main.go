@@ -18,11 +18,12 @@ import (
 
 type (
 	Version struct {
-		Name string
-		Url  string
-		Size uint32
-		Date int64
-		Body string
+		Name          string
+		Url           string
+		Size          uint32
+		Date          int64
+		Body          string
+		DownloadCount uint32
 	}
 
 	RepositoryVersions struct {
@@ -46,9 +47,10 @@ type (
 	}
 
 	GithubReleaseAsset struct {
-		CreatedAt string `json:"created_at"`
-		Size      uint32 `json:"size"`
-		URL       string `json:"browser_download_url"`
+		DownloadCount uint32 `json:"download_count"`
+		CreatedAt     string `json:"created_at"`
+		Size          uint32 `json:"size"`
+		URL           string `json:"browser_download_url"`
 	}
 
 	GithubRelease struct {
@@ -63,17 +65,26 @@ type (
 		Vendor string `xml:",chardata"`
 	}
 
+	IdeaVersion struct {
+		Min        string `xml:"min,attr"`
+		Max        string `xml:"max,attr"`
+		SinceBuild string `xml:"since-build,attr"`
+	}
+
 	IdeaPlugin struct {
-		Size        uint32 `xml:"size,attr"`
-		Date        int64  `xml:"date,attr"`
-		Url         string `xml:"url,attr"`
-		Name        string `xml:"name"`
-		ID          string `xml:"id"`
-		Description string `xml:"description"`
-		Version     string `xml:"version"`
-		Vendor      Vendor `xml:"vendor"`
-		ChangeNotes string `xml:"change-notes,cdata"`
-		DownloadUrl string `xml:"downloadUrl"`
+		Downloads   uint32      `xml:"downloads,attr"`
+		Size        uint32      `xml:"size,attr"`
+		Date        int64       `xml:"date,attr"`
+		Url         string      `xml:"url,attr"`
+		Name        string      `xml:"name"`
+		ID          string      `xml:"id"`
+		Description string      `xml:"description"`
+		Version     string      `xml:"version"`
+		Vendor      Vendor      `xml:"vendor"`
+		IdeaVersion IdeaVersion `xml:"idea-version"`
+		ChangeNotes string      `xml:"change-notes,cdata"`
+		DownloadUrl string      `xml:"downloadUrl"`
+		Rating      float32     `xml:"rating"`
 	}
 
 	PluginCategory struct {
@@ -189,11 +200,12 @@ func updateRepository(r *http.Request, owner string, repository Repository) Repo
 		relD = relD * 1000
 
 		rel := Version{
-			Name: release.TagName,
-			Url:  release.Assets[0].URL,
-			Size: release.Assets[0].Size,
-			Date: relD,
-			Body: release.Body,
+			Name:          release.TagName,
+			DownloadCount: release.Assets[0].DownloadCount,
+			Url:           release.Assets[0].URL,
+			Size:          release.Assets[0].Size,
+			Date:          relD,
+			Body:          release.Body,
 		}
 
 		if relType.FindString(release.TagName) == "alpha" && repository.Versions.Alpha.Name == "" {
@@ -318,15 +330,21 @@ func ideaPluginHandler(w http.ResponseWriter, r *http.Request) {
 
 	ideaPlugin := IdeaPlugin{
 		Name:        repository.PluginName,
-		ID:          repository.Id,
+		ID:          repository.Id + "." + vars["channel"],
 		Description: repository.Description,
 		Version:     version.Name,
 		Size:        version.Size,
 		Date:        version.Date,
 		Url:         fmt.Sprintf("https://github.com/%s/%s", vars["owner"], vars["repository"]),
 		DownloadUrl: version.Url,
+		Downloads:   version.DownloadCount,
 		ChangeNotes: version.Body,
 		Vendor:      repository.Vendor,
+		IdeaVersion: IdeaVersion{
+			Min:        "n/a",
+			Max:        "n/a",
+			SinceBuild: "122.0",
+		},
 	}
 
 	pluginCategory := PluginCategory{
@@ -335,7 +353,7 @@ func ideaPluginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	plugin := PluginRepository{
-		Ff:       "Custom Languages",
+		Ff:       "\"Custom Languages\"",
 		Category: pluginCategory,
 	}
 
@@ -346,12 +364,13 @@ func ideaPluginHandler(w http.ResponseWriter, r *http.Request) {
 	case "xml":
 		{
 			w.Header().Set("Content-Type", "application/xml")
-			response, err = xml.Marshal(plugin)
+			response, err = xml.MarshalIndent(plugin, "", "    ")
+			response = []byte(xml.Header + string(response))
 		}
 	default:
 		{
 			w.Header().Set("Content-Type", "application/json")
-			response, err = json.Marshal(plugin)
+			response, err = json.MarshalIndent(plugin, "", "    ")
 		}
 	}
 
