@@ -18,6 +18,9 @@ type (
 	Version struct {
 		Name string
 		Url  string
+		Size uint32
+		Date int64
+		Body string
 	}
 
 	RepositoryVersions struct {
@@ -27,9 +30,12 @@ type (
 	}
 
 	Repository struct {
-		Id       string
-		Name     string
-		Versions RepositoryVersions
+		Id          string
+		Name        string
+		PluginName  string
+		Description string
+		Versions    RepositoryVersions
+		Vendor      Vendor
 	}
 
 	Organization struct {
@@ -38,22 +44,45 @@ type (
 	}
 
 	GithubReleaseAsset struct {
-		URL string `json:"browser_download_url"`
+		CreatedAt string `json:"created_at"`
+		Size      uint32 `json:"size"`
+		URL       string `json:"browser_download_url"`
 	}
 
 	GithubRelease struct {
+		Body    string               `json:"body"`
 		TagName string               `json:"tag_name"`
 		Assets  []GithubReleaseAsset `json:"assets"`
 	}
 
-	IdeaPlugin struct {
-		Id      string `json:"id" xml:"id,attr"`
-		Url     string `json:"url" xml:"url,attr"`
-		Version string `json:"version" xml:"version,attr"`
+	Vendor struct {
+		Email  string `xml:"email,attr"`
+		Url    string `xml:"url,attr"`
+		Vendor string `xml:",chardata"`
 	}
 
-	plugins struct {
-		Plugins []IdeaPlugin `json:"plugin" xml:"plugin"`
+	IdeaPlugin struct {
+		Size        uint32 `xml:"size,attr"`
+		Date        int64  `xml:"date,attr"`
+		Url         string `xml:"url,attr"`
+		Name        string `xml:"name"`
+		ID          string `xml:"id"`
+		Description string `xml:"description"`
+		Version     string `xml:"version"`
+		Vendor      Vendor `xml:"vendor"`
+		ChangeNotes string `xml:"change-notes,cdata"`
+		DownloadUrl string `xml:"downloadUrl"`
+	}
+
+	PluginCategory struct {
+		Name       string     `xml:"name,attr"`
+		IdeaPlugin IdeaPlugin `xml:"idea-plugin"`
+	}
+
+	PluginRepository struct {
+		Ff       string         `xml:"ff"`
+		Category PluginCategory `xml:"category"`
+		XMLName  struct{}       `xml:"plugin-repository"`
 	}
 )
 
@@ -68,8 +97,22 @@ var (
 )
 
 func initSupportedRepositories() {
-	repositories = append(repositories, Organization{Name: "go-lang-plugin-org"})
-	repositories[0].Repositories = append(repositories[0].Repositories, Repository{Id: "ro.redeul.google.go", Name: "go-lang-idea-plugin"})
+	organization := Organization{
+		Name: "go-lang-plugin-org",
+	}
+	repositories = append(repositories, organization)
+	repository := Repository{
+		Id:          "ro.redeul.google.go",
+		Name:        "go-lang-idea-plugin",
+		PluginName:  "Go language (golang.org) support plugin",
+		Description: "Google Go language IDE built using the Intellij Platform. Released both an integrated IDE and as a standalone Intellij IDEA plugin",
+		Vendor: Vendor{
+			Email:  "mtoader@gmail.com",
+			Url:    "https://github.com/go-lang-plugin-org/go-lang-idea-plugin",
+			Vendor: "mtoader@gmail.com",
+		},
+	}
+	repositories[0].Repositories = append(repositories[0].Repositories, repository)
 }
 
 func updateRepository(r *http.Request, owner string, repository Repository) Repository {
@@ -118,19 +161,31 @@ func updateRepository(r *http.Request, owner string, repository Repository) Repo
 
 	for _, release := range ghRelease {
 
+		relDate, err := time.Parse("2006-01-02T15:04:05Z", release.Assets[0].CreatedAt)
+		relD := time.Now().UTC().Unix()
+		if err == nil {
+			relD = relDate.Unix()
+		}
+		relD = relD * 1000
+
+		rel := Version{
+			Name: release.TagName,
+			Url:  release.Assets[0].URL,
+			Size: release.Assets[0].Size,
+			Date: relD,
+			Body: release.Body,
+		}
+
 		if relType.FindString(release.TagName) == "alpha" && repository.Versions.Alpha.Name == "" {
-			repository.Versions.Alpha.Name = release.TagName
-			repository.Versions.Alpha.Url = release.Assets[0].URL
+			repository.Versions.Alpha = rel
 		}
 
 		if relType.FindString(release.TagName) == "beta" && repository.Versions.Beta.Name == "" {
-			repository.Versions.Beta.Name = release.TagName
-			repository.Versions.Beta.Url = release.Assets[0].URL
+			repository.Versions.Beta = rel
 		}
 
 		if relType.FindString(release.TagName) == "release" && repository.Versions.Release.Name == "" {
-			repository.Versions.Release.Name = release.TagName
-			repository.Versions.Release.Url = release.Assets[0].URL
+			repository.Versions.Release = rel
 		}
 	}
 
@@ -209,13 +264,28 @@ func ideaPluginHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	plugin := IdeaPlugin{
-		Id:      repository.Id,
-		Url:     version.Url,
-		Version: version.Name,
+	ideaPlugin := IdeaPlugin{
+		Name:        repository.PluginName,
+		ID:          repository.Id,
+		Description: repository.Description,
+		Version:     version.Name,
+		Size:        version.Size,
+		Date:        version.Date,
+		Url:         fmt.Sprintf("https://github.com/%s/%s", vars["owner"], vars["repository"]),
+		DownloadUrl: version.Url,
+		ChangeNotes: version.Body,
+		Vendor:      repository.Vendor,
 	}
-	plugins := plugins{}
-	plugins.Plugins = append(plugins.Plugins, plugin)
+
+	pluginCategory := PluginCategory{
+		Name:       "\"Custom Languages\"",
+		IdeaPlugin: ideaPlugin,
+	}
+
+	plugin := PluginRepository{
+		Ff:       "\"Custom Languages\"",
+		Category: pluginCategory,
+	}
 
 	var response []byte
 	var err error
@@ -224,21 +294,17 @@ func ideaPluginHandler(w http.ResponseWriter, r *http.Request) {
 	case "xml":
 		{
 			w.Header().Set("Content-Type", "application/xml")
-
-			response, err = xml.Marshal(plugins)
-			if err != nil && appengine.IsDevAppServer() {
-				panic(err)
-			}
+			response, err = xml.Marshal(plugin)
 		}
 	default:
 		{
 			w.Header().Set("Content-Type", "application/json")
-
-			response, err = json.Marshal(plugins)
-			if err != nil && appengine.IsDevAppServer() {
-				panic(err)
-			}
+			response, err = json.Marshal(plugin)
 		}
+	}
+
+	if err != nil && appengine.IsDevAppServer() {
+		panic(err)
 	}
 
 	w.Write(response)
@@ -251,6 +317,6 @@ func init() {
 	r := mux.NewRouter()
 	r.HandleFunc("/", rootHandler)
 	r.HandleFunc("/update", updateHandler)
-	r.HandleFunc("/{owner}/{repository}/{channel}/idea.{format}", ideaPluginHandler)
+	r.HandleFunc("/{owner}/{repository}/{channel}.{format}", ideaPluginHandler)
 	http.Handle("/", r)
 }
