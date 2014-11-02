@@ -263,32 +263,52 @@ func tokenHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
 	w.Write([]byte(OAuthToken))
 }
+
 func submitErrorHandler(w http.ResponseWriter, r *http.Request) {
-	var (
-		client *http.Client
-	)
+	var client *http.Client
 	vars := mux.Vars(r)
 
-	body, err := ioutil.ReadAll(r.Body)
-	if err != nil {
-		return
-	}
+	w.Header().Set("Content-Type", "application/json")
 
-	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/issues", vars["owner"], vars["repository"])
+	r.Header.Set("User-Agent", r.Header.Get("User-Agent")+" "+userAgent)
 
-	r.Header.Set("User-Agent", userAgent)
-	r.Header.Set("Authorization", "token "+OAuthToken)
 	c := appengine.NewContext(r)
 	client = urlfetch.Client(c)
 
-	response, err := client.Post(url, "application/json", bytes.NewBuffer(body))
+	body, err := ioutil.ReadAll(r.Body)
 	if err != nil {
+		w.WriteHeader(500)
 		if appengine.IsDevAppServer() {
+			c.Errorf("%+v", err)
 			panic(err)
 		}
+		return
 	}
 
-	_ = response
+	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/issues?access_token=%s", vars["owner"], vars["repository"], OAuthToken)
+
+	response, err := client.Post(url, "application/json", bytes.NewBuffer(body))
+	if err != nil {
+		w.WriteHeader(500)
+		if appengine.IsDevAppServer() {
+			c.Errorf("%+v", err)
+			panic(err)
+		}
+		return
+	}
+
+	body, err = ioutil.ReadAll(response.Body)
+	if err != nil {
+		w.WriteHeader(500)
+		if appengine.IsDevAppServer() {
+			c.Errorf("%+v", err)
+			panic(err)
+		}
+		return
+	}
+
+	w.WriteHeader(response.StatusCode)
+	w.Write(body)
 }
 
 func ideaPluginHandler(w http.ResponseWriter, r *http.Request) {
