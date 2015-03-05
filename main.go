@@ -1,19 +1,21 @@
 package wrigi
 
 import (
-	"appengine"
-	"appengine/urlfetch"
 	"bytes"
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
-	"github.com/gorilla/mux"
 	"io/ioutil"
 	"net/http"
 	"os"
 	"regexp"
 	"sync"
 	"time"
+
+	"github.com/gorilla/mux"
+
+	"appengine"
+	"appengine/urlfetch"
 )
 
 type (
@@ -54,9 +56,9 @@ type (
 	}
 
 	GithubRelease struct {
-		Body    string               `json:"body"`
-		TagName string               `json:"tag_name"`
-		Assets  []GithubReleaseAsset `json:"assets"`
+		Body   string               `json:"body"`
+		Name   string               `json:"name"`
+		Assets []GithubReleaseAsset `json:"assets"`
 	}
 
 	Vendor struct {
@@ -100,7 +102,7 @@ type (
 )
 
 const (
-	userAgent string = "Wrigi 0.1 (https://github.com/dlsniper/wrigi)"
+	userAgent string = "Wrigi 0.3 (https://github.com/dlsniper/wrigi)"
 )
 
 var (
@@ -135,8 +137,8 @@ func initSupportedRepositories() {
 	repository := Repository{
 		Id:          "ro.redeul.google.go",
 		Name:        "go-lang-idea-plugin",
-		PluginName:  "Go language (golang.org) support plugin",
-		Description: "Google Go language IDE built using the Intellij Platform. Released both an integrated IDE and as a standalone Intellij IDEA plugin",
+		PluginName:  "Go",
+		Description: "Go language Support",
 		Vendor: Vendor{
 			Email:  "mtoader@gmail.com",
 			Url:    "https://github.com/go-lang-plugin-org/go-lang-idea-plugin",
@@ -192,6 +194,8 @@ func updateRepository(r *http.Request, owner string, repository Repository) Repo
 
 	for _, release := range ghRelease {
 
+		fmt.Printf("%#v<br/>\n", release)
+
 		relDate, err := time.Parse("2006-01-02T15:04:05Z", release.Assets[0].CreatedAt)
 		relD := time.Now().UTC().Unix()
 		if err == nil {
@@ -200,7 +204,7 @@ func updateRepository(r *http.Request, owner string, repository Repository) Repo
 		relD = relD * 1000
 
 		rel := Version{
-			Name:          release.TagName,
+			Name:          release.Name,
 			DownloadCount: release.Assets[0].DownloadCount,
 			Url:           release.Assets[0].URL,
 			Size:          release.Assets[0].Size,
@@ -208,15 +212,15 @@ func updateRepository(r *http.Request, owner string, repository Repository) Repo
 			Body:          release.Body,
 		}
 
-		if relType.FindString(release.TagName) == "alpha" && repository.Versions.Alpha.Name == "" {
+		if relType.FindString(release.Name) == "alpha" && repository.Versions.Alpha.Name == "" {
 			repository.Versions.Alpha = rel
 		}
 
-		if relType.FindString(release.TagName) == "beta" && repository.Versions.Beta.Name == "" {
+		if relType.FindString(release.Name) == "beta" && repository.Versions.Beta.Name == "" {
 			repository.Versions.Beta = rel
 		}
 
-		if relType.FindString(release.TagName) == "release" && repository.Versions.Release.Name == "" {
+		if relType.FindString(release.Name) == "release" && repository.Versions.Release.Name == "" {
 			repository.Versions.Release = rel
 		}
 	}
@@ -363,7 +367,7 @@ func ideaPluginHandler(w http.ResponseWriter, r *http.Request) {
 		IdeaVersion: IdeaVersion{
 			Min:        "n/a",
 			Max:        "n/a",
-			SinceBuild: "122.0",
+			SinceBuild: "139.1111",
 		},
 	}
 
